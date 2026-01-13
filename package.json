@@ -1,0 +1,17 @@
+{
+  "name": "pear-login-server",
+  "version": "1.0.0",
+  "description": "Pear自动登录服务，每4小时刷新Cookie",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "install-deps": "npm install"
+  },
+  "dependencies": {
+    "pako": "^2.1.0",
+    "secure-remote-password": "*"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
