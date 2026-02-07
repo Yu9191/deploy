@@ -2,16 +2,18 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# 复制并安装依赖
 COPY package.json ./
 RUN npm install --production
 
+# 复制应用文件
 COPY server.js ./
 
-# 数据目录
+# 创建数据目录
 RUN mkdir -p /app/data
-VOLUME /app/data
 
-# 修改输出路径到数据目录
-ENV OUTPUT_PATH=/app/data/cookie.json
+# 暴露端口（Koyeb 需要）
+EXPOSE 3000
 
+# 启动服务
 CMD ["node", "server.js"]
