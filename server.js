@@ -536,6 +536,11 @@ async function testCookieValidity(movieId = null) {
 }
 
 // 定时任务
+// 失败重试计数器
+let failureCount = 0;
+const MAX_FAILURES = 3;
+const FAILURE_DELAY = 10 * 60 * 1000; // 失败后等待10分钟
+
 async function runTask() {
     const creds = loadCredentials();
     if (!creds) {
@@ -543,13 +548,27 @@ async function runTask() {
         process.exit(1);
     }
     
+    // 如果连续失败次数过多，延长等待时间
+    if (failureCount >= MAX_FAILURES) {
+        console.log(`[${new Date().toISOString()}] 连续失败 ${failureCount} 次，跳过本次登录，等待下次定时任务`);
+        return false;
+    }
+    
     try {
         const result = await login(creds.username, creds.password);
         saveResult(result);
+        failureCount = 0; // 成功后重置计数器
         console.log(`[${new Date().toISOString()}] 登录成功，下次刷新: ${new Date(Date.now() + CONFIG.refreshInterval).toISOString()}`);
         return true;
     } catch (e) {
-        console.error(`[${new Date().toISOString()}] 登录失败:`, e.message);
+        failureCount++;
+        console.error(`[${new Date().toISOString()}] 登录失败 (${failureCount}/${MAX_FAILURES}):`, e.message);
+        
+        // 如果是频率限制错误，增加失败计数
+        if (e.message.includes('LoginError1') || e.message.includes('ipBlack')) {
+            console.error(`[${new Date().toISOString()}] 检测到频率限制，将在 ${FAILURE_DELAY / 60000} 分钟后重试`);
+        }
+        
         return false;
     }
 }
