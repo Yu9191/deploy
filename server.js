@@ -23,7 +23,7 @@ const CONFIG = {
     cbcKeyHex: 'b38313aed3d51f971769102760a4012182fbe26505853dd710f7dc656cf33a0a',
     loginenc: 'l2',
     baseUrl: 'https://dirt.pearhot.com',
-    refreshInterval: 4 * 60 * 60 * 1000,  // 4小时
+    refreshInterval: 2 * 60 * 60 * 1000,  // 2小时
     outputFile: path.join(__dirname, 'cookie.json'),
     httpPort: process.env.PORT || 3000,
     testMovieId: '8cfc5220-c280-2be4-8b1b-3a1dfc3eeda4'  // 测试用视频ID
@@ -420,8 +420,11 @@ function generateSign(rule, url, timeStr) {
 }
 
 // 测试 Cookie 有效性
-async function testCookieValidity() {
+async function testCookieValidity(movieId = null) {
     if (!currentData) return { success: false, error: '无登录数据' };
+    
+    // 使用传入的 movieId 或默认的测试 ID
+    const testId = movieId || CONFIG.testMovieId;
     
     try {
         // 解析 cookie 中的 __msg_k 和 __rule_k
@@ -439,13 +442,13 @@ async function testCookieValidity() {
         if (jsonEnd > 0) ruleStr = ruleStr.substring(0, jsonEnd + 1);
         const rule = JSON.parse(ruleStr);
         
-        // 调用 WatchMovie API
-        const signUrl = '/api/movie/watchmovie';
-        const time = Date.now().toString();
-        const sign = generateSign(rule, signUrl, time);
+        // 调用 WatchMovieCzn API (新接口)
+        let signUrl = '/api/movie/watchmovieczn';
+        let time = Date.now().toString();
+        let sign = generateSign(rule, signUrl, time);
         
-        const res = await httpRequest('POST', '/api/movie/WatchMovie', 
-            `movieId=${CONFIG.testMovieId}&onlyCzn=0`, {
+        let res = await httpRequest('POST', '/api/movie/WatchMovieCzn', 
+            `movieId=${testId}`, {
             'Cookie': currentData.cookie,
             'app-token': rule.appToken,
             'loginenc': currentData.pk,
@@ -454,19 +457,45 @@ async function testCookieValidity() {
             'sign': sign
         });
         
+        let watchResult = null;
+        
         if (res.status === 200 && /^[0-9a-fA-F]+$/.test(res.data)) {
             // 解密响应
             const decrypted = decryptGcmResponse(res.data, msgkBuffer);
-            const watchResult = JSON.parse(decrypted);
+            watchResult = JSON.parse(decrypted);
             
-            if (watchResult.value === true && watchResult.checkId) {
+            // 如果 WatchMovieCzn 失败，尝试 WatchMovieOnLine
+            if (!watchResult || !watchResult.value) {
+                console.log('WatchMovieCzn 失败，尝试 WatchMovieOnLine...');
+                
+                signUrl = '/api/movie/watchmovieonline';
+                time = Date.now().toString();
+                sign = generateSign(rule, signUrl, time);
+                
+                res = await httpRequest('POST', '/api/movie/WatchMovieOnLine', 
+                    `movieId=${testId}`, {
+                    'Cookie': currentData.cookie,
+                    'app-token': rule.appToken,
+                    'loginenc': currentData.pk,
+                    'loginenc7': currentData.pk,
+                    'time': time,
+                    'sign': sign
+                });
+                
+                if (res.status === 200 && /^[0-9a-fA-F]+$/.test(res.data)) {
+                    const decrypted2 = decryptGcmResponse(res.data, msgkBuffer);
+                    watchResult = JSON.parse(decrypted2);
+                }
+            }
+            
+            if (watchResult && watchResult.value === true && watchResult.checkId) {
                 // 继续调用 movieCloud 获取播放地址
                 const signUrl2 = '/api/movieplay/moviecloud';
                 const time2 = Date.now().toString();
                 const sign2 = generateSign(rule, signUrl2, time2);
                 
                 const res2 = await httpRequest('POST', '/api/moviePlay/movieCloud',
-                    `movieId=${CONFIG.testMovieId}&checkId=${watchResult.checkId}`, {
+                    `movieId=${testId}&checkId=${watchResult.checkId}`, {
                     'Cookie': currentData.cookie,
                     'app-token': rule.appToken,
                     'loginenc': currentData.pk,
@@ -481,6 +510,7 @@ async function testCookieValidity() {
                     return { 
                         success: true, 
                         message: 'Cookie 有效',
+                        movieId: testId,
                         data: {
                             name: cloudResult.name,
                             thumbnail: cloudResult.thumbnail,
@@ -492,15 +522,16 @@ async function testCookieValidity() {
                 
                 return { 
                     success: true, 
-                    message: 'Cookie 有效 (WatchMovie成功，但获取播放地址失败)',
+                    message: 'Cookie 有效 (获取checkId成功，但获取播放地址失败)',
+                    movieId: testId,
                     data: { checkId: watchResult.checkId }
                 };
             }
         }
         
-        return { success: false, error: 'API 返回异常', raw: res.data };
+        return { success: false, error: 'API 返回异常或两个接口都失败', movieId: testId, raw: res.data };
     } catch (e) {
-        return { success: false, error: e.message };
+        return { success: false, error: e.message, movieId: testId };
     }
 }
 
@@ -548,6 +579,15 @@ function getHtmlPage() {
         button:active { transform: scale(0.98); }
         button.refresh { background: #e94560; }
         button.refresh:hover { background: #ff6b81; }
+        .test-section { background: #16213e; border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+        .test-section h3 { color: #9b59b6; margin-bottom: 15px; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; color: #888; margin-bottom: 8px; font-size: 14px; }
+        .input-group input { width: 100%; background: #0f0f23; border: 2px solid #0f3460; color: #eee; padding: 12px; border-radius: 8px; font-size: 14px; font-family: monospace; }
+        .input-group input:focus { outline: none; border-color: #00d9ff; }
+        .input-group .hint { font-size: 12px; color: #666; margin-top: 5px; }
+        .test-btn { width: 100%; background: #9b59b6; }
+        .test-btn:hover { background: #8e44ad; }
         .data-box { background: #16213e; border-radius: 10px; padding: 20px; margin-bottom: 20px; }
         .data-box h3 { color: #00d9ff; margin-bottom: 15px; }
         .data-content { background: #0f0f23; border-radius: 5px; padding: 15px; font-family: monospace; font-size: 13px; word-break: break-all; max-height: 200px; overflow-y: auto; }
@@ -580,8 +620,17 @@ function getHtmlPage() {
             <button onclick="getCookie()">获取 Cookie</button>
             <button onclick="getPk()">获取 PK</button>
             <button onclick="getAll()">获取全部数据</button>
-            <button onclick="testApi()" style="background:#9b59b6;">测试 API</button>
             <button class="refresh" onclick="doRefresh()">立即刷新</button>
+        </div>
+        
+        <div class="test-section">
+            <h3>🧪 API 测试</h3>
+            <div class="input-group">
+                <label>视频 ID (movieId)</label>
+                <input type="text" id="testMovieId" placeholder="留空使用默认测试 ID" />
+                <div class="hint">输入视频 ID 进行测试，留空则使用默认 ID: ${CONFIG.testMovieId}</div>
+            </div>
+            <button class="test-btn" onclick="testApi()">测试 API</button>
         </div>
         
         <div class="data-box" id="dataBox" style="display:none;">
@@ -625,7 +674,7 @@ function getHtmlPage() {
                     if (data.lastUpdate) {
                         const d = new Date(data.lastUpdate);
                         document.getElementById('lastUpdate').textContent = d.toLocaleString('zh-CN');
-                        const next = new Date(d.getTime() + 4 * 60 * 60 * 1000);
+                        const next = new Date(d.getTime() + 2 * 60 * 60 * 1000);
                         document.getElementById('nextRefresh').textContent = next.toLocaleString('zh-CN');
                     }
                 } else {
@@ -663,9 +712,11 @@ function getHtmlPage() {
         }
         
         async function testApi() {
+            const customId = document.getElementById('testMovieId').value.trim();
             showToast('正在测试...');
             try {
-                const res = await fetch('/test');
+                const url = customId ? '/test?id=' + encodeURIComponent(customId) : '/test';
+                const res = await fetch(url);
                 const data = await res.json();
                 if (data.success) {
                     showData('测试结果 ✅', data);
@@ -734,7 +785,9 @@ function startHttpServer() {
             // 测试 Cookie 有效性
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
             try {
-                const result = await testCookieValidity();
+                // 从查询参数获取自定义 movieId
+                const customId = url.searchParams.get('id');
+                const result = await testCookieValidity(customId);
                 res.end(JSON.stringify(result, null, 2));
             } catch (e) {
                 res.end(JSON.stringify({ success: false, error: e.message }));
